@@ -635,6 +635,8 @@ extern LPDIRECTDRAWSURFACE7 lpddsback;
 extern DDSURFACEDESC2 ddsd;
 extern RECT src, dst;
 
+extern UINT32 FrameBuffer[];
+
 UINT32 z64gl_command = 0;
 UINT32 command_counter = 0;
 int SaveLoaded = 0;
@@ -1566,6 +1568,11 @@ int rdp_update()
 			break;
 		}
         default:    popmessage("Unknown framebuffer format %d\n", vi_control & 0x3);
+	}
+
+	for (int i = 0; i < PRESCALE_HEIGHT; i++)
+	{
+		memcpy(&FrameBuffer[i * PRESCALE_WIDTH], &PreScale[i * pitchindwords], PRESCALE_WIDTH * sizeof(INT32));
 	}
 
 	res = IDirectDrawSurface_Unlock(lpddsback, 0);
