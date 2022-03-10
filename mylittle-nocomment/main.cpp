@@ -1,5 +1,6 @@
 #include "z64.h"
 #include "Gfx #1.3.h"
+#include "mednafen/Deinterlacer.h"
 
 extern const int screen_width = 1024, screen_height = 768;
 
@@ -10,6 +11,10 @@ DDSURFACEDESC2 ddsd;
 HRESULT res;
 RECT dst, src;
 INT32 pitchindwords;
+
+alignas(UINT32) UINT32 FrameBuffer[PRESCALE_WIDTH * PRESCALE_HEIGHT];
+Deinterlacer deint;
+extern int oldlowerfield;
 
 FILE* zeldainfo = 0;
 int ProcessDListShown = 0;
@@ -58,25 +63,31 @@ EXPORT void CALL DllTest ( HWND hParent )
 {
 }
 
-UINT32 FrameBuffer[PRESCALE_WIDTH * PRESCALE_HEIGHT];
-
 EXPORT void CALL ReadScreen(void **dest, long *width, long *height)
 {
 	UINT32 w = PRESCALE_WIDTH;
 	UINT32 h = src.bottom;
-	if (h < 480)
+	if (h < 480) // progressive; double the height
 	{
 		UINT32* s = FrameBuffer + (h - 1) * w;
 		UINT32* d = FrameBuffer + ((h * 2) - 1) * w;
 		for (UINT32 i = 0; i < h; i++)
 		{
-			memcpy(d, s, w * sizeof (UINT32));
+			memcpy(d, s, w * sizeof(UINT32));
 			memcpy(d - w, s, w * sizeof(UINT32));
 			d -= w * 2;
 			s -= w;
 		}
 		h *= 2;
 	}
+	else // interlaced; deinterlace
+	{
+		deint.SetType(Deinterlacer::DEINT_BOB_OFFSET);
+		MDFN_Surface surf(FrameBuffer, w, h, w);
+		MDFN_Rect rect = { 0, 0, (int32)w, (int32)h, };
+		deint.Process(&surf, rect, oldlowerfield);
+	}
+
 	*width = w;
 	*height = h;
 	*dest = malloc(w * h * 3);
@@ -321,7 +332,6 @@ EXPORT void CALL ShowCFB (void)
 EXPORT void CALL UpdateScreen (void)
 {
 	rdp_update();
-	
 	
 	
 	
