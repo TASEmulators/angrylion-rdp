@@ -1,29 +1,9 @@
 #ifndef __Z64_H__
 #define __Z64_H__
 
-#if defined (_MSC_VER) && (_MSC_VER >= 1500)
-#define _CRT_SECURE_NO_WARNINGS
-#endif
-
 #include <stdio.h>
-
-#ifdef WIN32
-#include <windows.h>
-#include <ddraw.h>
-#endif
-
-#if defined (_MSC_VER) && (_MSC_VER >= 1300)
-#include <basetsd.h>
-#endif
-
-#if defined (_MSC_VER) && (_MSC_VER < 1300)
-typedef unsigned char UINT8;
-typedef signed short INT16;
-typedef unsigned short UINT16;
-#endif
-
-#if !defined (_MSC_VER) || (_MSC_VER >= 1600)
 #include <stdint.h>
+
 typedef uint64_t UINT64;
 typedef int64_t INT64;
 typedef uint32_t UINT32;
@@ -32,7 +12,6 @@ typedef uint16_t UINT16;
 typedef int16_t INT16;
 typedef uint8_t UINT8;
 typedef int8_t INT8;
-#endif
 
 #define SP_INTERRUPT	0x1
 #define SI_INTERRUPT	0x2
@@ -93,41 +72,36 @@ typedef int8_t INT8;
 #define DWORD_XOR_DWORD_SWAP 1
 
 #define INLINE
-#ifdef _MSC_VER
-#define STRICTINLINE	__forceinline
-#else
 #define STRICTINLINE	inline
-#endif
 
 #define PRESCALE_WIDTH 640
 #define PRESCALE_HEIGHT 625
-extern const int screen_width, screen_height;
 
 typedef unsigned int offs_t;
 
-#define rdram ((UINT32*)gfx.RDRAM)
-#define rsp_imem ((UINT32*)gfx.IMEM)
-#define rsp_dmem ((UINT32*)gfx.DMEM)
+#define rdram ((UINT32*)ares::Nintendo64::rdram.ram.data)
+#define rsp_dmem ((UINT32*)ares::Nintendo64::rsp.dmem.data)
 
-#define rdram16 ((UINT16*)gfx.RDRAM)
-#define rdram8 (gfx.RDRAM)
+#define rdram16 ((UINT16*)ares::Nintendo64::rdram.ram.data)
+#define rdram8 ((UINT8*)ares::Nintendo64::rdram.ram.data)
 
-#define vi_origin (*(UINT32*)gfx.VI_ORIGIN_REG)
-#define vi_width (*(UINT32*)gfx.VI_WIDTH_REG)
-#define vi_control (*(UINT32*)gfx.VI_STATUS_REG)
-#define vi_v_sync (*(UINT32*)gfx.VI_V_SYNC_REG)
-#define vi_h_sync (*(UINT32*)gfx.VI_H_SYNC_REG)
-#define vi_h_start (*(UINT32*)gfx.VI_H_START_REG)
-#define vi_v_start (*(UINT32*)gfx.VI_V_START_REG)
-#define vi_v_intr (*(UINT32*)gfx.VI_INTR_REG)
-#define vi_x_scale (*(UINT32*)gfx.VI_X_SCALE_REG)
-#define vi_y_scale (*(UINT32*)gfx.VI_Y_SCALE_REG)
-#define vi_timing (*(UINT32*)gfx.VI_TIMING_REG)
-#define vi_v_current_line (*(UINT32*)gfx.VI_V_CURRENT_LINE_REG)
+#define vi_control (ares::Nintendo64::vi.readWord(0 << 2))
+#define vi_origin (ares::Nintendo64::vi.readWord(1 << 2))
+#define vi_width (ares::Nintendo64::vi.readWord(2 << 2))
 
-#define dp_start (*(UINT32*)gfx.DPC_START_REG)
-#define dp_end (*(UINT32*)gfx.DPC_END_REG)
-#define dp_current (*(UINT32*)gfx.DPC_CURRENT_REG)
-#define dp_status (*(UINT32*)gfx.DPC_STATUS_REG)
+#define vi_v_current_line (ares::Nintendo64::vi.readWord(4 << 2))
+
+#define vi_v_sync (ares::Nintendo64::vi.readWord(6 << 2))
+
+#define vi_h_start (ares::Nintendo64::vi.readWord(9 << 2))
+#define vi_v_start (ares::Nintendo64::vi.readWord(10 << 2))
+
+#define vi_x_scale (ares::Nintendo64::vi.readWord(12 << 2))
+#define vi_y_scale (ares::Nintendo64::vi.readWord(13 << 2))
+
+#define dp_start (ares::Nintendo64::rdp.readWord(0 << 2))
+#define dp_end (ares::Nintendo64::rdp.readWord(1 << 2))
+#define dp_current (ares::Nintendo64::rdp.readWord(2 << 2))
+#define dp_status (ares::Nintendo64::rdp.readWord(3 << 2))
 
 #endif

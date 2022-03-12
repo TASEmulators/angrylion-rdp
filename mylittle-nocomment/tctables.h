@@ -1,6 +1,8 @@
 #ifndef _TCTABLES_H
 #define _TCTABLES_H
 
+namespace angrylion {
+
 const INT32 norm_point_table[64] = {
 0x4000,
 0x3f04,
@@ -134,5 +136,7 @@ const INT32 norm_slope_table[64] = {
 0xfbe,
 0xfbe
 };
+
+}
 
 #endif
