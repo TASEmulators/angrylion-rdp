@@ -16,6 +16,7 @@ extern INLINE void fatalerror(const char* err, ...);
 
 extern UINT32 FrameBuffer[];
 extern int visiblelines;
+extern int oldlowerfield;
 
 UINT32 FinalizedFrameBuffer[640 * 576];
 
@@ -27,24 +28,34 @@ UINT32 * FinalizeFrame(int deinterlacer)
 	{
 		UINT32* s = FrameBuffer;
 		UINT32* d = FinalizedFrameBuffer;
+		UINT32 doubleW = w * 2;
 		for (UINT32 i = 0; i < h; i++)
 		{
 			memcpy(d, s, w * sizeof (UINT32));
 			memcpy(d + w, s, w * sizeof(UINT32));
 			s += w;
-			d += w * 2;
+			d += doubleW;
 		}
 	}
 	else
 	{
-		// default is weave
-		UINT32* s = FrameBuffer;
-		UINT32* d = FinalizedFrameBuffer;
-		for (UINT32 i = 0; i < h; i++)
+		if (deinterlacer) // bob
 		{
-			memcpy(d, s, w * sizeof (UINT32));
-			s += w;
-			d += w;
+			UINT32* s = FrameBuffer + oldlowerfield * w;
+			UINT32* d = FinalizedFrameBuffer;
+			UINT32 doubleW = w * 2;
+			UINT32 halfH = h / 2;
+			for (UINT32 i = 0; i < halfH; i++)
+			{
+				memcpy(d, s, w * sizeof (UINT32));
+				memcpy(d + w, s, w * sizeof (UINT32));
+				s += doubleW;
+				d += doubleW;
+			}
+		}
+		else // weave
+		{
+			memcpy(FinalizedFrameBuffer, FrameBuffer, w * h * sizeof (UINT32));
 		}
 	}
 	return FinalizedFrameBuffer;
