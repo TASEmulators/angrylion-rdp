@@ -143,6 +143,8 @@ EXPORT void CALL DllTest ( HWND hParent );
 
 EXPORT void CALL ReadScreen(void **dest, long *width, long *height);
 
+EXPORT void CALL DllCrtFree(void *p); // mupen specific
+
 /******************************************************************
   Function: DrawScreen
   Purpose:  This function is called when the emulator receives a
