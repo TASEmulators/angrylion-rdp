@@ -1,27 +1,13 @@
 #include "z64.h"
-#include "Gfx #1.3.h"
-#include "shlwapi.h"
+#include "m64p_api/m64p_api.h"
 
-extern const int screen_width = 1024, screen_height = 768;
-
-LPDIRECTDRAW7 lpdd = 0;
-LPDIRECTDRAWSURFACE7 lpddsprimary;
-LPDIRECTDRAWSURFACE7 lpddsback;
-DDSURFACEDESC2 ddsd;
-HRESULT res;
-RECT dst, src;
-INT32 pitchindwords;
-
-UINT32 FrameBuffer[PRESCALE_WIDTH * PRESCALE_HEIGHT];
-UINT32 FinalizedFrameBuffer[PRESCALE_WIDTH * PRESCALE_HEIGHT];
+extern UINT32 FrameBuffer[];
+extern int visiblelines;
 extern int oldlowerfield;
 
-FILE* zeldainfo = 0;
-int ProcessDListShown = 0;
-extern int SaveLoaded;
-extern UINT32 command_counter;
+UINT32 FinalizedFrameBuffer[PRESCALE_WIDTH * PRESCALE_HEIGHT];
 
-extern GFX_INFO gfx;
+GFX_INFO gfx;
 
 int rdp_init();
 int rdp_close();
@@ -30,94 +16,150 @@ void rdp_process_list(void);
 extern INLINE void popmessage(const char* err, ...);
 extern INLINE void fatalerror(const char* err, ...);
 
-static char config_path[MAX_PATH + 1] = { 0 };
-static BOOL BobDeinterlacer = TRUE;
-static const char* WeaveActiveStr = "Do you want to switch the AVI deinterlacer from Weave to Bob?";
-static const char* BobActiveStr = "Do you want to switch the AVI deinterlacer from Bob to Weave?";
+static BOOL ProcessDListShown = FALSE;
 
-BOOL WINAPI DllMain(HINSTANCE hinstDLL, DWORD fdwReason, LPVOID lpvReserved)
+static m64p_handle Config = nullptr;
+static BOOL BobDeinterlacer = TRUE;
+
+static ptr_ConfigOpenSection ConfigOpenSectionFunc = nullptr;
+static ptr_ConfigSaveSection ConfigSaveSectionFunc = nullptr;
+static ptr_ConfigSetDefaultBool ConfigSetDefaultBoolFunc = nullptr;
+static ptr_ConfigGetParamBool ConfigGetParamBoolFunc = nullptr;
+
+static m64p_dynlib_handle CoreLibHandle = nullptr;
+
+static BOOL inited = FALSE;
+
+static void (*render_cb)(int) = nullptr;
+
+extern "C"
 {
-	if (fdwReason == DLL_PROCESS_ATTACH)
+
+EXPORT m64p_error CALL PluginStartup(m64p_dynlib_handle coreLibHandle, void*, void (*)(void*, int, const char*))
+{
+	if (inited)
 	{
-		GetModuleFileName(hinstDLL, config_path, sizeof(config_path));
-		PathRemoveFileSpec(config_path);
-		PathAppend(config_path, "mylittle_config.bin");
-		FILE* f = fopen(config_path, "r+b");
-		if (!f)
-		{
-			BobDeinterlacer = TRUE;
-			f = fopen(config_path, "wb");
-			if (!f)
-			{
-				popmessage("Unable to create config file");
-			}
-			else
-			{
-				UINT8 i = TRUE;
-				fwrite(&i, 1, 1, f);
-				fclose(f);
-			}
-		}
-		else
-		{
-			UINT8 o = TRUE;
-			fread(&o, 1, 1, f);
-			BobDeinterlacer = !!o;
-			fclose(f);
-		}
+		return M64ERR_ALREADY_INIT;
 	}
+
+	CoreLibHandle = coreLibHandle;
+
+	ConfigOpenSectionFunc = (ptr_ConfigOpenSection)DLSYM(CoreLibHandle, "ConfigOpenSection");
+	ConfigSaveSectionFunc = (ptr_ConfigSaveSection)DLSYM(CoreLibHandle, "ConfigSaveSection");
+	ConfigSetDefaultBoolFunc = (ptr_ConfigSetDefaultBool)DLSYM(CoreLibHandle, "ConfigSetDefaultBool");
+	ConfigGetParamBoolFunc = (ptr_ConfigGetParamBool)DLSYM(CoreLibHandle, "ConfigGetParamBool");
+
+	ConfigOpenSectionFunc("Video-Angrylion", &Config);
+	ConfigSetDefaultBoolFunc(Config, "BobDeinterlacer", TRUE, "Use Bob Deinterlacer if True, Use Weave Deinterlacer if False");
+	ConfigSaveSectionFunc("Video-Angrylion");
+
+	inited = TRUE;
+	return M64ERR_SUCCESS;
+}
+
+EXPORT m64p_error CALL PluginShutdown(void)
+{
+	if (!inited)
+	{
+		return M64ERR_NOT_INIT;
+	}
+
+	inited = false;
+	return M64ERR_SUCCESS;
+}
+
+EXPORT m64p_error CALL PluginGetVersion(m64p_plugin_type* PluginType, int* PluginVersion, int* APIVersion, const char** PluginNamePtr, int* Capabilities)
+{
+	#define MAYBE_SET(x, y) do { if (x) *x = y; } while (0)
+
+	MAYBE_SET(PluginType, M64PLUGIN_GFX);
+	MAYBE_SET(PluginVersion, 1);
+	MAYBE_SET(APIVersion, 0x020100);
+	MAYBE_SET(PluginNamePtr, "My little plugin");
+	MAYBE_SET(Capabilities, 0);
+
+	#undef MAYBE_SET
+
+	return M64ERR_SUCCESS;
+}
+
+EXPORT BOOL CALL InitiateGFX(GFX_INFO Gfx_Info)
+{
+	gfx = Gfx_Info;
 	return TRUE;
 }
 
-EXPORT void CALL CaptureScreen(char* Directory)
+EXPORT void CALL MoveScreen(int, int)
 {
 }
 
+EXPORT void CALL ProcessDList(void)
+{
+	if (!ProcessDListShown)
+	{
+		popmessage("ProcessDList");
+		ProcessDListShown = TRUE;
+	}
+}
+
+EXPORT void CALL ProcessRDPList(void)
+{
+	rdp_process_list();
+}
+
+EXPORT BOOL CALL RomOpen(void)
+{
+	BobDeinterlacer = ConfigGetParamBoolFunc(Config, "BobDeinterlacer");
+	rdp_init();
+	return TRUE;
+}
+
+EXPORT void CALL RomClosed(void)
+{
+	rdp_close();
+}
+
+EXPORT void CALL ShowCFB(void)
+{
+}
+
+EXPORT void CALL UpdateScreen(void)
+{
+	rdp_update();
+	if (render_cb)
+	{
+		render_cb(1);
+	}
+}
+
+EXPORT void CALL ViStatusChanged(void)
+{
+}
+
+EXPORT void CALL ViWidthChanged(void)
+{
+}
 
 EXPORT void CALL ChangeWindow(void)
 {
 }
 
-
-EXPORT void CALL CloseDLL(void)
+EXPORT void CALL ReadScreen2(void* dest, int* width, int* height, int)
 {
-}
-
-
-EXPORT void CALL DllAbout(HWND hParent)
-{
-	popmessage("angrylion's RDP, unpublished beta. MESS source code used.");
-}
-
-EXPORT void CALL DllConfig(HWND hParent)
-{
-	int res = MessageBoxA(0, BobDeinterlacer ? BobActiveStr : WeaveActiveStr, "Config", MB_YESNO | MB_ICONINFORMATION);
-	if (res == IDYES)
+	if (!dest)
 	{
-		BobDeinterlacer = !BobDeinterlacer;
-		FILE* f = fopen(config_path, "wb");
-		if (f)
+		*width = PRESCALE_WIDTH;
+		switch (visiblelines)
 		{
-			UINT8 i = BobDeinterlacer;
-			fwrite(&i, 1, 1, f);
-			fclose(f);
+			case 240: case 480: *height = 480; break;
+			case 288: case 576: *height = 576; break;
+			default: *height = 480; break;
 		}
-		else
-		{
-			popmessage("Unable to update config file");
-		}
+		return;
 	}
-}
 
-
-EXPORT void CALL DllTest(HWND hParent)
-{
-}
-
-EXPORT void CALL ReadScreen(void** dest, long* width, long* height)
-{
 	UINT32 w = PRESCALE_WIDTH;
-	UINT32 h = src.bottom;
+	UINT32 h = visiblelines;
 	if (h < 640) // progressive; double the height
 	{
 		UINT32* s = FrameBuffer;
@@ -163,246 +205,36 @@ EXPORT void CALL ReadScreen(void** dest, long* width, long* height)
 
 	*width = w;
 	*height = h;
-	*dest = malloc(w * h * 3);
-	if (!*dest)
-	{
-		fatalerror("Could not allocate memory for ReadScreen()!");
-	}
 
-	UINT32* finalfb = FinalizedFrameBuffer + w * (h - 1);
-	UINT8* ret = (UINT8*)(*dest);
+	UINT32* s = FinalizedFrameBuffer;
+	UINT32* d = ((UINT32*)dest) + w * (h - 1);
 	for (UINT32 i = 0; i < h; i++)
 	{
-		for (UINT32 j = 0; j < w; j++)
-		{
-			UINT8* d = &ret[j * 3];
-			UINT32 p = finalfb[j];
-			d[0] = p >> 0 & 0xFF;
-			d[1] = p >> 8 & 0xFF;
-			d[2] = p >> 16 & 0xFF;
-		}
-		finalfb -= w;
-		ret += w * 3;
+		memcpy(d, s, w * sizeof(UINT32));
+		s += w;
+		d -= w;
 	}
 }
 
-// for mupen to free what's returned from ReadScreen
-EXPORT void CALL DllCrtFree(void* p)
+EXPORT void CALL SetRenderingCallback(void (*callback)(int))
 {
-	free(p);
+	render_cb = callback;
 }
 
-
-EXPORT void CALL DrawScreen(void)
+EXPORT void CALL ResizeVideoOutput(int, int)
 {
 }
 
-
-EXPORT void CALL GetDllInfo(PLUGIN_INFO* PluginInfo)
-{
-	PluginInfo->Version = 0x0103;
-	PluginInfo->Type = PLUGIN_TYPE_GFX;
-	sprintf(PluginInfo->Name, "My little plugin");
-	PluginInfo->NormalMemory = TRUE;
-	PluginInfo->MemoryBswaped = TRUE;
-}
-
-
-GFX_INFO gfx;
-
-EXPORT BOOL CALL InitiateGFX(GFX_INFO Gfx_Info)
-{
-	gfx = Gfx_Info;
-
-	return TRUE;
-}
-
-
-EXPORT void CALL MoveScreen(int xpos, int ypos)
-{
-	RECT statusrect;
-	POINT p;
-	p.x = p.y = 0;
-	GetClientRect(gfx.hWnd, &dst);
-	ClientToScreen(gfx.hWnd, &p);
-	OffsetRect(&dst, p.x, p.y);
-	GetClientRect(gfx.hStatusBar, &statusrect);
-	dst.bottom -= statusrect.bottom;
-}
-
-
-EXPORT void CALL ProcessDList(void)
-{
-	if (!ProcessDListShown)
-	{
-		popmessage("ProcessDList");
-		ProcessDListShown = 1;
-	}
-}
-
-
-EXPORT void CALL ProcessRDPList(void)
-{
-	rdp_process_list();
-	return;
-}
-
-
-EXPORT void CALL RomClosed(void)
-{
-	rdp_close();
-	if (lpddsback)
-	{
-		IDirectDrawSurface_Release(lpddsback);
-		lpddsback = 0;
-	}
-	if (lpddsprimary)
-	{
-		IDirectDrawSurface_Release(lpddsprimary);
-		lpddsprimary = 0;
-	}
-	if (lpdd)
-	{
-		IDirectDraw_Release(lpdd);
-		lpdd = 0;
-	}
-
-	SaveLoaded = 1;
-	command_counter = 0;
-}
-
-
-EXPORT void CALL RomOpen(void)
-{
-	RECT bigrect, smallrect, statusrect;
-
-	GetWindowRect(gfx.hWnd, &bigrect);
-	GetClientRect(gfx.hWnd, &smallrect);
-	int rightdiff = screen_width - smallrect.right;
-	int bottomdiff = screen_height - smallrect.bottom;
-	if (gfx.hStatusBar)
-	{
-		GetClientRect(gfx.hStatusBar, &statusrect);
-		bottomdiff += statusrect.bottom;
-	}
-	MoveWindow(gfx.hWnd, bigrect.left, bigrect.top, bigrect.right - bigrect.left + rightdiff, bigrect.bottom - bigrect.top + bottomdiff, TRUE);
-
-	DDPIXELFORMAT ftpixel;
-	LPDIRECTDRAWCLIPPER lpddcl;
-
-	res = DirectDrawCreateEx(0, (LPVOID*)&lpdd, IID_IDirectDraw7, 0);
-	if (res != DD_OK)
-		fatalerror("Couldn't create a DirectDraw object");
-	res = IDirectDraw_SetCooperativeLevel(lpdd, gfx.hWnd, DDSCL_NORMAL);
-	if (res != DD_OK)
-		fatalerror("Couldn't set a cooperative level. Error code %x", res);
-
-	memset(&ddsd, 0, sizeof(ddsd));
-	ddsd.dwSize = sizeof(ddsd);
-	ddsd.dwFlags = DDSD_CAPS;
-	ddsd.ddsCaps.dwCaps = DDSCAPS_PRIMARYSURFACE;
-
-	res = IDirectDraw_CreateSurface(lpdd, &ddsd, &lpddsprimary, 0);
-	if (res != DD_OK)
-		fatalerror("CreateSurface for a primary surface failed. Error code %x", res);
-
-	ddsd.dwFlags = DDSD_CAPS | DDSD_HEIGHT | DDSD_WIDTH | DDSD_PIXELFORMAT;
-	ddsd.ddsCaps.dwCaps = DDSCAPS_OFFSCREENPLAIN;
-	ddsd.dwWidth = PRESCALE_WIDTH;
-	ddsd.dwHeight = PRESCALE_HEIGHT;
-	memset(&ftpixel, 0, sizeof(ftpixel));
-	ftpixel.dwSize = sizeof(ftpixel);
-	ftpixel.dwFlags = DDPF_RGB;
-	ftpixel.dwRGBBitCount = 32;
-	ftpixel.dwRBitMask = 0xff0000;
-	ftpixel.dwGBitMask = 0xff00;
-	ftpixel.dwBBitMask = 0xff;
-	ddsd.ddpfPixelFormat = ftpixel;
-	res = IDirectDraw_CreateSurface(lpdd, &ddsd, &lpddsback, 0);
-	if (res == DDERR_INVALIDPIXELFORMAT)
-		fatalerror("ARGB8888 is not supported. You can try changing desktop color depth to 32-bit, but most likely that won't help.");
-	else if (res != DD_OK)
-		fatalerror("CreateSurface for a secondary surface failed. Error code %x", res);
-
-	res = IDirectDrawSurface_GetSurfaceDesc(lpddsback, &ddsd);
-	if (res != DD_OK)
-		fatalerror("GetSurfaceDesc failed.");
-	if ((ddsd.lPitch & 3) || ddsd.lPitch < (PRESCALE_WIDTH << 2))
-		fatalerror("Pitch of a secondary surface is either not 32 bit aligned or two small.");
-	pitchindwords = ddsd.lPitch >> 2;
-
-	res = IDirectDraw_CreateClipper(lpdd, 0, &lpddcl, 0);
-	if (res != DD_OK)
-		fatalerror("Couldn't create a clipper.");
-	res = IDirectDrawClipper_SetHWnd(lpddcl, 0, gfx.hWnd);
-	if (res != DD_OK)
-		fatalerror("Couldn't register a windows handle as a clipper.");
-	res = IDirectDrawSurface_SetClipper(lpddsprimary, lpddcl);
-	if (res != DD_OK)
-		fatalerror("Couldn't attach a clipper to a surface.");
-
-	src.top = src.left = 0;
-	src.bottom = 0;
-	src.right = PRESCALE_WIDTH;
-
-	POINT p;
-	p.x = p.y = 0;
-	GetClientRect(gfx.hWnd, &dst);
-	ClientToScreen(gfx.hWnd, &p);
-	OffsetRect(&dst, p.x, p.y);
-	GetClientRect(gfx.hStatusBar, &statusrect);
-	dst.bottom -= statusrect.bottom;
-
-	DDBLTFX ddbltfx;
-	ddbltfx.dwSize = sizeof(DDBLTFX);
-	ddbltfx.dwFillColor = 0;
-	res = IDirectDrawSurface_Blt(lpddsprimary, &dst, 0, 0, DDBLT_COLORFILL | DDBLT_WAIT, &ddbltfx);
-	src.bottom = PRESCALE_HEIGHT;
-	res = IDirectDrawSurface_Blt(lpddsback, &src, 0, 0, DDBLT_COLORFILL | DDBLT_WAIT, &ddbltfx);
-
-	rdp_init();
-}
-
-
-EXPORT void CALL ShowCFB(void)
-{
-	rdp_update();
-}
-
-
-
-EXPORT void CALL UpdateScreen(void)
-{
-	rdp_update();
-}
-
-
-EXPORT void CALL ViStatusChanged(void)
+EXPORT void CALL FBWrite(unsigned int, unsigned int)
 {
 }
 
-
-EXPORT void CALL ViWidthChanged(void)
+EXPORT void CALL FBRead(unsigned int)
 {
 }
 
-
-
-EXPORT void CALL FBWrite(DWORD, DWORD)
+EXPORT void CALL FBGetFrameBufferInfo(void*)
 {
 }
 
-EXPORT void CALL FBWList(FrameBufferModifyEntry* plist, DWORD size)
-{
 }
-
-
-EXPORT void CALL FBRead(DWORD addr)
-{
-}
-
-
-EXPORT void CALL FBGetFrameBufferInfo(void* pinfo)
-{
-}
-

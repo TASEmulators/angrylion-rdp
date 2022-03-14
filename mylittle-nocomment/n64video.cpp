@@ -1,5 +1,5 @@
 #include "z64.h"
-#include "Gfx #1.3.h"
+#include "m64p_api/m64p_api.h"
 #include "tctables.h"
 #include <stdarg.h>
 
@@ -25,11 +25,7 @@ INLINE void fatalerror(const char * err, ...)
 	va_list arg;
 	va_start(arg, err);
 	vsprintf(VsprintfBuffer, err, arg);
-#ifdef _WIN32
-	MessageBoxA(0,VsprintfBuffer,"RDP: fatal error",MB_OK);
-#else
 	printf(VsprintfBuffer);
-#endif
 	va_end(arg);
 	exit(0);
 }
@@ -40,11 +36,7 @@ INLINE void popmessage(const char* err, ...)
 	va_list arg;
 	va_start(arg, err);
 	vsprintf(VsprintfBuffer, err, arg);
-#ifdef _WIN32
-	MessageBoxA(0,VsprintfBuffer,"RDP: warning",MB_OK);
-#else
 	printf(VsprintfBuffer);
-#endif
 	va_end(arg);
 }
 
@@ -57,8 +49,6 @@ UINT32 rdp_cmd_data[0x10000];
 UINT32 rdp_cmd_ptr = 0;
 UINT32 rdp_cmd_cur = 0;
 UINT32 ptr_onstart = 0;
-
-extern FILE* zeldainfo;
 
 UINT32 prevvicurrent = 0;
 int emucontrolsvicurrent = -1;
@@ -627,15 +617,8 @@ struct onetime
 	int copymstrangecrashes, fillmcrashes, fillmbitcrashes, syncfullcrash, vbusclock;
 } onetimewarnings;
 
-extern INT32 pitchindwords;
-extern HRESULT res;
-extern LPDIRECTDRAW7 lpdd;
-extern LPDIRECTDRAWSURFACE7 lpddsprimary; 
-extern LPDIRECTDRAWSURFACE7 lpddsback;
-extern DDSURFACEDESC2 ddsd;
-extern RECT src, dst;
-
-extern UINT32 FrameBuffer[];
+UINT32 FrameBuffer[PRESCALE_WIDTH * PRESCALE_HEIGHT];
+int visiblelines;
 
 UINT32 z64gl_command = 0;
 UINT32 command_counter = 0;
@@ -1043,9 +1026,6 @@ int rdp_update()
 
 #ifdef _WIN32
 	int slowbright = 0;
-	if (GetAsyncKeyState(0x91))
-		brightness = (brightness + 1) & 15;
-	slowbright = brightness >> 1;
 #endif
 
 	INT32 v_start = (vi_v_start >> 16) & 0x3ff;
@@ -1108,7 +1088,7 @@ int rdp_update()
 
 	oldvstart = v_start;
 
-	int linecount = serration_pulses ? (pitchindwords << 1) : pitchindwords;
+	int linecount = serration_pulses ? (PRESCALE_WIDTH << 1) : PRESCALE_WIDTH;
 	int lineshifter = serration_pulses ? 0 : 1;
 	int twolines = serration_pulses ? 1 : 0;
 
@@ -1175,7 +1155,7 @@ int rdp_update()
 
 	INT32 *d = 0;
 
-	UINT32 prescale_ptr = v_start * linecount + h_start + (lowerfield ? pitchindwords : 0);
+	UINT32 prescale_ptr = v_start * linecount + h_start + (lowerfield ? PRESCALE_WIDTH : 0);
 	
 	int minhpass = h_start_clamped ? 0 : 8;
 	int maxhpass =  hres_clamped ? hres : (hres - 7);
@@ -1185,28 +1165,13 @@ int rdp_update()
 		return 0;
 	}
 
-	res = IDirectDrawSurface_Lock(lpddsback, 0, &ddsd, DDLOCK_SURFACEMEMORYPTR | DDLOCK_NOSYSLOCK, 0);
-	if (res == DDERR_SURFACELOST)
-	{
-		while(1){
-		res = IDirectDrawSurface_Restore(lpddsback);
-		if (res != DD_OK)
-			fatalerror("Restore failed with DirectDraw error %x", res);
-		res = IDirectDrawSurface_Lock(lpddsback, 0, &ddsd, DDLOCK_SURFACEMEMORYPTR | DDLOCK_NOSYSLOCK, 0);
-		if (res != DDERR_SURFACELOST)
-			break;
-		};
-	}
-	else if (res != DD_OK)
-		fatalerror("Lock failed with DirectDraw error %x", res);
-
-	PreScale = (INT32*)ddsd.lpSurface;
+	PreScale = (INT32*)FrameBuffer;
 
 	if (!(vitype & 2))
 	{
 		memset(tvfadeoutstate, 0, PRESCALE_HEIGHT * sizeof(UINT32));
 		for (i = 0; i < PRESCALE_HEIGHT; i++)
-			memset(&PreScale[i * pitchindwords], 0, PRESCALE_WIDTH * sizeof(INT32)); 
+			memset(&PreScale[i * PRESCALE_WIDTH], 0, PRESCALE_WIDTH * sizeof(INT32)); 
 		prevwasblank = 1;
 	}
 	else
@@ -1216,12 +1181,12 @@ int rdp_update()
 		if (h_start > 0 && h_start < PRESCALE_WIDTH)
 		{
 			for (i = 0; i < vactivelines; i++)
-				memset(&PreScale[i * pitchindwords], 0, h_start * sizeof(UINT32));
+				memset(&PreScale[i * PRESCALE_WIDTH], 0, h_start * sizeof(UINT32));
 		}
 		if (h_end >= 0 && h_end < PRESCALE_WIDTH)
 		{
 			for (i = 0; i < vactivelines; i++)
-				memset(&PreScale[i * pitchindwords + h_end], 0, hrightblank * sizeof(UINT32));
+				memset(&PreScale[i * PRESCALE_WIDTH + h_end], 0, hrightblank * sizeof(UINT32));
 		}
 
 		for (i = 0; i < ((v_start << twolines) + (lowerfield ? 1 : 0)); i++)
@@ -1232,9 +1197,9 @@ int rdp_update()
 				if (!tvfadeoutstate[i])
 				{
 					if (validh)
-						memset(&PreScale[i * pitchindwords + h_start], 0, hres * sizeof(UINT32));
+						memset(&PreScale[i * PRESCALE_WIDTH + h_start], 0, hres * sizeof(UINT32));
 					else
-						memset(&PreScale[i * pitchindwords], 0, PRESCALE_WIDTH * sizeof(UINT32));
+						memset(&PreScale[i * PRESCALE_WIDTH], 0, PRESCALE_WIDTH * sizeof(UINT32));
 				}
 			}
 		}
@@ -1249,7 +1214,7 @@ int rdp_update()
 					tvfadeoutstate[i]--;
 					if (!tvfadeoutstate[i])
 					{
-						memset(&PreScale[i * pitchindwords], 0, PRESCALE_WIDTH * sizeof(UINT32));
+						memset(&PreScale[i * PRESCALE_WIDTH], 0, PRESCALE_WIDTH * sizeof(UINT32));
 					}
 				}
 
@@ -1266,7 +1231,7 @@ int rdp_update()
 				{
 					tvfadeoutstate[i]--;
 					if (!tvfadeoutstate[i])
-						memset(&PreScale[i * pitchindwords], 0, PRESCALE_WIDTH * sizeof(UINT32));
+						memset(&PreScale[i * PRESCALE_WIDTH], 0, PRESCALE_WIDTH * sizeof(UINT32));
 				}
 
 				if (tvfadeoutstate[i + 1])
@@ -1274,9 +1239,9 @@ int rdp_update()
 					tvfadeoutstate[i + 1]--;
 					if (!tvfadeoutstate[i + 1])
 						if (validh)
-							memset(&PreScale[(i + 1) * pitchindwords + h_start], 0, hres * sizeof(UINT32));
+							memset(&PreScale[(i + 1) * PRESCALE_WIDTH + h_start], 0, hres * sizeof(UINT32));
 						else
-							memset(&PreScale[(i + 1) * pitchindwords], 0, PRESCALE_WIDTH * sizeof(UINT32));
+							memset(&PreScale[(i + 1) * PRESCALE_WIDTH], 0, PRESCALE_WIDTH * sizeof(UINT32));
 				}
 
 				i += 2;
@@ -1288,9 +1253,9 @@ int rdp_update()
 				tvfadeoutstate[i]--;
 			if (!tvfadeoutstate[i])
 				if (validh)
-					memset(&PreScale[i * pitchindwords + h_start], 0, hres * sizeof(UINT32));
+					memset(&PreScale[i * PRESCALE_WIDTH + h_start], 0, hres * sizeof(UINT32));
 				else
-					memset(&PreScale[i * pitchindwords], 0, PRESCALE_WIDTH * sizeof(UINT32));
+					memset(&PreScale[i * PRESCALE_WIDTH], 0, PRESCALE_WIDTH * sizeof(UINT32));
 		}
  	}
 
@@ -1569,38 +1534,8 @@ int rdp_update()
 		}
         default:    popmessage("Unknown framebuffer format %d\n", vi_control & 0x3);
 	}
-
-	for (int i = 0; i < PRESCALE_HEIGHT; i++)
-	{
-		memcpy(&FrameBuffer[i * PRESCALE_WIDTH], &PreScale[i * pitchindwords], PRESCALE_WIDTH * sizeof(INT32));
-	}
-
-	res = IDirectDrawSurface_Unlock(lpddsback, 0);
-	if (res != DD_OK && res != DDERR_GENERIC && res != DDERR_SURFACELOST)
-		fatalerror("Couldn't unlock the offscreen surface with DirectDraw error %x", res);
 	
-	int visiblelines = (ispal ? 576 : 480) >> lineshifter;
-
-	src.bottom = visiblelines;
-
-	if (dst.left < dst.right && dst.top < dst.bottom)
-	{
-		res = IDirectDrawSurface_Blt(lpddsprimary, &dst, lpddsback, &src, DDBLT_WAIT, 0);
-		if (res == DDERR_SURFACELOST)
-		{
-			while(1){
-			res = IDirectDraw4_RestoreAllSurfaces(lpdd);
-			if (res != DD_OK)
-				fatalerror("RestoreAllSurfaces failed with DirectDraw error %x", res);
-			res = IDirectDrawSurface_Blt(lpddsprimary, &dst, lpddsback, &src, DDBLT_WAIT, 0);		
-			if (res != DDERR_SURFACELOST)
-				break;
-			}
-		}
-		else if (res != DD_OK && res != DDERR_GENERIC && res != DDERR_OUTOFMEMORY)
-			fatalerror("Scaled blit failed with DirectDraw error %x", res);
-		
-	}
+	visiblelines = (ispal ? 576 : 480) >> lineshifter;
 
 	return 0;
 }
@@ -10548,22 +10483,6 @@ UINT32 vi_integer_sqrt(UINT32 a)
     return res;
 }
 
-INLINE void clearscreen(UINT32 x0, UINT32 y0, UINT32 x1, UINT32 y1, UINT32 white)
-{
-	DDBLTFX ddbltfx; 
-	RECT bltrect;
-	bltrect.left = x0;
-	bltrect.right = x1 - 1;
-	bltrect.top = y0;
-	bltrect.bottom = y1 - 1;
-	memset(&ddbltfx, 0, sizeof(DDBLTFX));
-	ddbltfx.dwSize = sizeof(DDBLTFX);
-	ddbltfx.dwFillColor = 0;
-	res = IDirectDrawSurface_Blt(lpddsprimary, &bltrect, 0, 0, DDBLT_WAIT | DDBLT_COLORFILL, &ddbltfx);
-	if (res != DD_OK)
-		fatalerror("clearscreen: Blt failed.");
-}
-
 INLINE void clearfb16(UINT16* fb, UINT32 width,UINT32 height)
 {
 	UINT16* d;
@@ -11459,297 +11378,6 @@ else if (other_modes.cycle_type == CYCLE_TYPE_2)
 	bRGBText[other_modes.blend_m2a_1],bAText[1][other_modes.blend_m2b_1]);
 }
 
-void showtile(UINT32 tilenum, int stop, int clamped)
-{
-	if (tilenum > 7)
-		fatalerror("showtile: tilenum > 7");
-	
-	if (fb_size!=PIXEL_SIZE_16BIT)
-		fatalerror("showtile: non 16bit frame buffer");
-	int taddr;
-	UINT32 tbase = tile[tilenum].tmem << 3;
-	UINT32 twidth = tile[tilenum].line << 3;
-	UINT32 tpal = tile[tilenum].palette;
-	UINT32 tformat = tile[tilenum].format;
-	UINT32 tsize = tile[tilenum].size;
-	if (tformat==4 && (tsize>1))
-		tformat = 0;
-	if (tformat==2 && (tsize>1))
-		tformat = 0;
-	if ((!tformat) && (tsize<2))
-		tformat = 2;
-
-	if (tformat & 1)
-		fatalerror("showtile: formats besides RGBA, CI and I are not implemented");
-
-	UINT32 nominalwidth = (tile[tilenum].sh >> 2) - (tile[tilenum].sl >> 2) + 1;
-	UINT32 nominalheight = (tile[tilenum].th >> 2) - (tile[tilenum].tl >> 2) + 1;
-	UINT32 height = clamped ? nominalheight : 479;
-	if (height > 479)
-		height = 479;
-	if (nominalheight == 1)
-		popmessage("showtile: alert");
-
-	if (clamped && nominalwidth < 1)
-		popmessage("showtile: non-positive nominalwidth");
-	
-	UINT32 s=0, t=0;
-	UINT8 *tc = TMEM;
-	UINT16 *tc16 = (UINT16*)TMEM;
-	UINT32* tc32 = (UINT32*)TMEM;
-	UINT32 x = (620 - nominalwidth - 1);
-	if (nominalwidth > 619)
-		fatalerror("showtile: too large");
-
-	clearscreen(492, 0, 620, 479, 1);
-
-	UINT32 y = 0;
-	INT32* d = 0;
-	
-	UINT8 r,g,b,a;
-	popmessage("showtile: tile %d taddr 0x%x tformat %d tsize %d clamps %d mirrors %d clampt %d mirrort %d masks %d maskt %d",
-		tilenum, tbase, tformat, tsize, tile[tilenum].cs, tile[tilenum].ms, tile[tilenum].ct, tile[tilenum].mt,
-		tile[tilenum].mask_s, tile[tilenum].mask_t);
-
-	res = IDirectDrawSurface_Lock(lpddsback, 0, &ddsd, DDLOCK_SURFACEMEMORYPTR | DDLOCK_NOSYSLOCK, 0);
-	if (res != DD_OK)
-		fatalerror("showtile: Lock failed.");
-	PreScale = (INT32*)ddsd.lpSurface;
-
-	switch (tformat)
-	{
-	case 0: 
-		{
-			switch (tsize)
-			{
-			case PIXEL_SIZE_16BIT:
-				{
-					for (t = 0; t < height; t++)
-					{
-						d = &PreScale[t * pitchindwords];
-						for (s = 0; s < nominalwidth; s++)
-						{
-							taddr = (tbase >> 1) + ((t) * (twidth >> 1)) + s;
-							taddr ^= ((t & 1) ? WORD_XOR_DWORD_SWAP : WORD_ADDR_XOR);
-							if (clamped && taddr > 0x7ff)
-								goto endrgb16;
-							taddr &= 0x7ff;
-							UINT16 c = tc16[taddr];
-							if (!other_modes.en_tlut)
-							{
-								r = GET_HI(c);
-								g = GET_MED(c);
-								b = GET_LOW(c);
-								a = (c & 1) ? 0xff : 0;
-							}
-							else
-							{
-								c = tlut[((c >> 8) & 0xff) << 2];
-								if (other_modes.tlut_type == 0)
-								{
-									r = GET_HI(c);
-									g = GET_MED(c);
-									b = GET_LOW(c);
-									a = (c & 1) ? 0xff : 0;
-								}
-								else
-								{
-									r = g = b = (c >> 8) & 0xff;
-									a = c & 0xff;
-								}
-							}
-							d[x + s] = (r << 16) | (g << 8) | b;
-						}
-					}
-endrgb16:
-					break;
-				}
-			case PIXEL_SIZE_32BIT:
-				{
-				if (other_modes.en_tlut)
-						popmessage("showtile: RGBA-32 with en_tlut not implemented");
-					for (t = 0; t < height; t++)
-					{
-						d = &PreScale[t * pitchindwords];
-						for (s = 0; s < nominalwidth; s++)
-						{
-							taddr = ((tbase >> 1) + ((t) * (twidth >> 1)) + s);
-							taddr ^= ((t & 1) ? WORD_XOR_DWORD_SWAP : WORD_ADDR_XOR);
-							taddr &= 0x3ff;
-							UINT32 c = tc16[taddr];
-							r = (c >> 8) & 0xff;
-							g = c & 0xff;
-							c = tc16[taddr | 0x400];
-							b = (c >>  8) & 0xff;
-							a = c & 0xff;
-							d[x + s] = (r << 16) | (g << 8) | b;
-						}
-					}
-					break;
-				}
-			default:
-				fatalerror("showtile: not 16-bit RGBA texel");
-				break;
-			}
-			break;
-		}
-	case 2: 
-	{
-		switch(tsize)
-		{
-		case PIXEL_SIZE_4BIT:
-		{
-			for (t = 0; t < height; t++)
-			{
-				d = &PreScale[t * pitchindwords];
-				for (s = 0; s < nominalwidth; s++)
-				{
-					taddr = (tbase + (t * twidth) + (s / 2)) ^ ((t & 1) ? BYTE_XOR_DWORD_SWAP : BYTE_ADDR_XOR);
-					taddr &= 0xfff;
-					UINT8 p;
-					UINT16 c;
-					if (other_modes.en_tlut)
-					{
-					taddr &= 0x7ff;
-					p = (s & 1) ? (tc[taddr] & 0xf) : (tc[taddr] >> 4);
-					c = tlut[((tpal << 4) | p) << 2];
-					if (other_modes.tlut_type == 0)
-					{
-						r = GET_HI(c);
-						g = GET_MED(c);
-						b = GET_LOW(c);
-						a = (c & 1) ? 0xff : 0;
-					}
-					else
-					{
-						p = ((s) & 1) ? (tc[taddr] & 0xf) : (tc[taddr] >> 4);
-						c = tlut[((tpal << 4) + p)<<2];
-						r = g = b = (c >> 8) & 0xff;
-						a = c & 0xff;
-					}
-					}
-					d[x + s] = (r << 16) | (g << 8) | b;
-				}
-			}
-		break;
-		}
-		case PIXEL_SIZE_8BIT:
-			{
-			for (t = 0; t < height; t++)
-			{
-				d = &PreScale[t * pitchindwords];
-				for (s = 0; s < nominalwidth; s++)
-				{
-					taddr = (tbase + (t * twidth) + (s)) ^ ((t & 1) ? BYTE_XOR_DWORD_SWAP : BYTE_ADDR_XOR);
-					taddr &= 0xfff;
-					UINT8 p = tc[taddr];
-					UINT16 c = tlut[p << 2];
-					if (other_modes.en_tlut)
-					{
-					if (other_modes.tlut_type == 0)
-					{
-						r = GET_HI(c);
-						g = GET_MED(c);
-						b = GET_LOW(c);
-						a = (c & 1) ? 0xff : 0;
-					}
-					else
-					{
-						r = g = b = (c >> 8) & 0xff;
-						a = c & 0xff;
-					}
-					}
-					d[x + s] = (r << 16) | (g << 8) | b;
-				}
-			}
-			break;
-			}
-		default: fatalerror("showtile: unknown CI tile");
-			break;
-		}
-		break;
-	}
-	case 4: 
-	{
-	switch (tsize)
-	{
-		case PIXEL_SIZE_4BIT:
-		{
-			for (t=0; t < height; t++)
-			{
-				d = &PreScale[t * pitchindwords];
-				for (s = 0; s < nominalwidth; s++)
-				{
-					taddr = (tbase + (t * twidth) + (s >> 1)) ^ ((t & 1) ? BYTE_XOR_DWORD_SWAP : BYTE_ADDR_XOR);
-					if (clamped && taddr > 0xfff)
-						goto endi4;
-					taddr &= 0xfff;
-					UINT8 byteval = tc[taddr];
-					UINT8 c = (s & 1) ? (byteval & 0xf) : ((byteval >> 4) & 0xf);
-					c |= (c << 4);
-					r = g = b = a = c;
-					d[x + s] = (r << 16) | (g << 8) | b;
-				}
-			}
-endi4:		
-			break;
-		}
-		case PIXEL_SIZE_8BIT:
-		{
-			for (t=0; t < height; t++)
-			{
-				d = &PreScale[t * pitchindwords];
-				for (s = 0; s < nominalwidth; s++)
-				{
-					taddr = (tbase + (t * twidth) + s) ^ ((t & 1) ? BYTE_XOR_DWORD_SWAP : BYTE_ADDR_XOR);
-					if (clamped && taddr >= 0xfff)
-						goto endi8;
-					taddr &= 0xfff;
-					UINT8 c = tc[taddr];
-					r = g = b = a = c;
-					d[x + s] = (r << 16) | (g << 8) | b;
-				}
-			}
-endi8:
-			break;
-		}
-		default:
-			fatalerror("showtile: unknown I texture size %d\n", tile[tilenum].size);
-			break;
-		}
-		break;
-	}
-	default:
-		fatalerror("showtile: formats besides I and CI are not implemented");
-		break;
-	}
-
-	res = IDirectDrawSurface_Unlock(lpddsback, 0);
-	if (res != DD_OK)
-		fatalerror("showtile: Unlock failed.");
-
-	src.bottom = 480;
-	res = IDirectDrawSurface_Blt(lpddsprimary, &dst, lpddsback, &src, DDBLT_WAIT, 0);
-	if (res != DD_OK)
-		fatalerror("showtile: Blt failed.");
-
-	if (stop)
-	{
-	while(!GetAsyncKeyState(VK_TAB))
-	{
-		if (GetAsyncKeyState(VK_ADD))
-			showtile((tilenum + 1)&7,1,clamped);
-		else if (GetAsyncKeyState(VK_SUBTRACT))
-			showtile((tilenum - 1)&7,1,clamped);
-		else if (GetAsyncKeyState(0x43))
-		{
-			clamped = (!clamped) ? 1 : 0;
-			showtile(tilenum,1,clamped);
-		}
-	}
-	}
-}
-
 void show_tri_command(void)
 {
 	popmessage("w0: 0x%08x, w1: 0x%08x, w2: 0x%08x",rdp_cmd_data[rdp_cmd_cur], rdp_cmd_data[rdp_cmd_cur + 1], rdp_cmd_data[rdp_cmd_cur + 2]);
@@ -11777,150 +11405,6 @@ void complete_delayed_hbwrites(int delayedhbwidx)
 void show_color(COLOR* col)
 {
 	popmessage("R: 0x%x, G: 0x%x, B: 0x%x, A: 0x%x", col->r, col->g, col->b, col->a);
-}
-
-void show_current_cfb(int isviorigin)
-{
-	int i, j;
-	UINT32 final = 0;
-	UINT32 r1, g1, b1;
-	UINT32 col0, col1;
-	UINT32 fbaddr = isviorigin ? vi_origin : fb_address;
-	
-	int hres, vres;
-	INT32 hdiff = (vi_h_start & 0x3ff)-((vi_h_start>>16)&0x3ff);
-	if (hdiff <= 0)
-		return;
-	hres = ((vi_x_scale & 0xfff) * hdiff) / 0x400;
-	INT32 invisiblewidth = vi_width - hres;
-	
-	INT32 vdiff = (vi_v_start & 0x3ff)-((vi_v_start >> 16) & 0x3ff);
-	if (vdiff <= 0)
-		return;
-	vdiff >>= 1;
-	vres = ((vi_y_scale & 0xfff) * vdiff) / 0x400;
-
-	if (hres > 640 || vres > 480)
-		popmessage("hres=%d vres=%d", hres, vres);
-#ifdef _WIN32
-	if (hres < 321 && vres < 241 && (GetAsyncKeyState(VK_SCROLL) || double_stretch == 2))
-	{
-		if (double_stretch==1)
-			double_stretch = 0;
-		else
-			double_stretch = 1;
-	}
-	if (hres > 320 || vres > 240)
-	{
-		if (GetAsyncKeyState(VK_SCROLL))
-			popmessage("Cannot double the resolution: %d %d",hres,vres);
-		if (double_stretch)
-			double_stretch = 2;
-		else
-			double_stretch = 0;
-	}
-#endif
-
-	res = IDirectDrawSurface_Lock(lpddsback, 0, &ddsd, DDLOCK_SURFACEMEMORYPTR | DDLOCK_NOSYSLOCK, 0);
-	if (res != DD_OK)
-		fatalerror("show_current_cfb: Blt failed.");
-	PreScale = (INT32*)ddsd.lpSurface;
-
-    switch (vi_control & 0x3)
-	{
-		case 0:		
-		case 1:
-		{
-			break;
-		}
-		case 2:		
-		{
-			UINT32 fbidx16 = (fbaddr & 0xffffff) >> 1;
-			for (j = 0; j < vres; j++)
-			{
-				INT32 *d, *e;
-				if (double_stretch != 1)
-					d = &PreScale[j * pitchindwords];
-				else
-				{
-					d = &PreScale[(j << 1) * pitchindwords];
-					e = &PreScale[((j << 1) + 1) * pitchindwords];
-				}
-		
-				for (i=0; i < hres; i++)
-				{
-					int r, g, b;
-					UINT16 pix;
-					
-					RREADIDX16(pix, fbidx16);
-					
-					r = GET_HI(pix);
-					g = GET_MED(pix);
-					b = GET_LOW(pix);
-					fbidx16++;
-					final = (r << 16) | (g << 8) | b;
-					if (double_stretch != 1)
-						d[i] = final;
-					else
-					{
-						d[i << 1] = final;
-						
-						if (i == (hres-1))
-						{
-							for (int k =0; k < hres; k ++)
-							{
-								col0 = d[k << 1];
-								col1 = d[(k << 1) + 2];
-								r1 = (((col0 >> 16)&0xff) + ((col1 >> 16)&0xff)) >> 1;
-								g1 = (((col0 >> 8)&0xff) + ((col1 >> 8)&0xff)) >> 1;
-								b1 = (((col0 >> 0)&0xff) + ((col1 >> 0)&0xff)) >> 1;
-								d[(k << 1) + 1] = (r1 << 16) | (g1 << 8) | b1;
-							}
-							memcpy(&e[0], &d[0], hres << 3);
-						}
-					}
-				}
-				fbidx16 +=invisiblewidth;
-			}
-			break;
-		}
-
-		case 3:		
-		{
-            UINT32 fbidx32 = (fbaddr & 0xffffff) >> 2;
-			for (j = 0; j < vres; j++)
-			{
-				INT32* d = &PreScale[j * pitchindwords];
-				for (i = 0; i < hres; i++)
-				{
-					UINT32 pix;
-					RREADIDX32(pix, fbidx32);
-					fbidx32++;
-					d[i] = pix >> 8;
-				}
-				fbidx32 +=invisiblewidth;
-		}
-		break;
-		}
-
-        default:    
-			popmessage("Unknown framebuffer format %d\n", vi_control & 0x3);
-			break;
-	}
-	res = IDirectDrawSurface_Unlock(lpddsback, 0);
-	if (res != DD_OK)
-		fatalerror("show_current_cfb: Unlock failed.");
-
-	RECT srcrect = src;
-	srcrect.bottom = vres;
-	srcrect.right = hres;
-	RECT smallrect = dst;
-	smallrect.bottom = smallrect.top + vres + 1;
-	smallrect.right = smallrect.left + hres + 1;
-	res = IDirectDrawSurface_Blt(lpddsprimary, &smallrect, lpddsback, &srcrect, DDBLT_WAIT, 0);
-	if (res != DD_OK)
-		fatalerror("show_current_cfb: Blt failed");
-
 }
 
 int getdebugcolor(void)
