@@ -7413,7 +7413,7 @@ static void rdp_sync_tile(UINT32 w1, UINT32 w2)
 static void rdp_sync_full(UINT32 w1, UINT32 w2)
 {
 	z64gl_command = 0;
-	ares::Nintendo64::mi.raise(ares::Nintendo64::MI::IRQ::DP);
+	ares::Nintendo64::rdp.syncFull();
 }
 
 static void rdp_set_key_gb(UINT32 w1, UINT32 w2)
