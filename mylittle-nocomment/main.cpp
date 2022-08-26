@@ -160,7 +160,7 @@ EXPORT void CALL ReadScreen2(void* dest, int* width, int* height, int)
 
 	UINT32 w = PRESCALE_WIDTH;
 	UINT32 h = visiblelines;
-	if (h < 640) // progressive; double the height
+	if (h < 480) // progressive; double the height
 	{
 		UINT32* s = FrameBuffer;
 		UINT32* d = FinalizedFrameBuffer;
