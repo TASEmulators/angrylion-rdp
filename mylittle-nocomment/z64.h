@@ -71,8 +71,12 @@ typedef int8_t INT8;
 #endif
 #define DWORD_XOR_DWORD_SWAP 1
 
-#define INLINE
-#define STRICTINLINE	inline
+#define LIKELY(x)   __builtin_expect(!!(x), 1)
+#define UNLIKELY(x) __builtin_expect(!!(x), 0)
+
+#define STATIC __attribute__((visibility("internal"))) static
+#define INLINE inline
+#define STRICTINLINE inline __attribute__((always_inline))
 
 #define PRESCALE_WIDTH 640
 #define PRESCALE_HEIGHT 625
