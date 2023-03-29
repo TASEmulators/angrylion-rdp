@@ -7,6 +7,9 @@
 
 namespace angrylion {
 
+#define vi_io ares::Nintendo64::vi.io
+#define rdp_cmd ares::Nintendo64::rdp.command
+
 #define SIGN16(x)	((INT16)(x))
 #define SIGN8(x)	((INT8)(x))
 
@@ -48,7 +51,6 @@ STATIC UINT32 rdp_cmd_cur = 0;
 STATIC UINT32 ptr_onstart = 0;
 
 STATIC UINT32 prevvicurrent = 0;
-STATIC int emucontrolsvicurrent = -1;
 STATIC int prevserrate = 0;
 int oldlowerfield = 0;
 STATIC INT32 oldvstart = 1337;
@@ -953,23 +955,23 @@ int rdp_update()
 	CCVG divot_array[0xa10 << 1];
 	
 	INT32 hres, vres;
-	hres = (vi_h_start & 0x3ff) - ((vi_h_start >> 16) & 0x3ff);
+	hres = vi_io.hend - vi_io.hstart;
 		
-	vres = (vi_v_start & 0x3ff) - ((vi_v_start >> 16) & 0x3ff);
+	vres = vi_io.vend - vi_io.vstart;
 	vres >>= 1;
 
-	int dither_filter = (vi_control >> 16) & 1;
-	int fsaa = !((vi_control >> 9) & 1);
-	int divot = (vi_control >> 4) & 1;
-	int gamma = (vi_control >> 3) & 1;
-	int gamma_dither = (vi_control >> 2) & 1;
-	int lerp_en = (((vi_control >> 8) & 3) != 3);
-	int extralines = !((vi_control >> 8) & 1);
+	int dither_filter = vi_io.dedither;
+	int fsaa = !vi_io.antialias.bit(1);
+	int divot = vi_io.divot;
+	int gamma = vi_io.gamma;
+	int gamma_dither = vi_io.gammaDither;
+	int lerp_en = vi_io.antialias != 3;
+	int extralines = !vi_io.antialias.bit(0);
 	
-	int vitype = vi_control & 3;
-	int serration_pulses = (vi_control >> 6) & 1;
+	int vitype = vi_io.colorDepth;
+	int serration_pulses = vi_io.serrate;
 	int gamma_and_dither = (gamma << 1) | gamma_dither;
-	if (UNLIKELY(((vi_control >> 5) & 1) && !onetimewarnings.vbusclock))
+	if (UNLIKELY(vi_io.reserved.bit(5) && !onetimewarnings.vbusclock))
 	{
 		popmessage("rdp_update: vbus_clock_enable bit set in VI_CONTROL_REG register. Never run this code on your N64! It's rumored that turning this bit on\
 					will result in permanent damage to the hardware! Emulation will now continue.\n");
@@ -978,12 +980,12 @@ int rdp_update()
 
 	vi_fetch_filter_ptr = vi_fetch_filter_func[vitype & 1];
 
-	int ispal = (vi_v_sync & 0x3ff) > 550;
+	int ispal = vi_io.halfLinesPerField > 550;
 
-	INT32 v_start = (vi_v_start >> 16) & 0x3ff;
-	INT32 h_start = (vi_h_start >> 16) & 0x3ff; 
+	INT32 v_start = vi_io.vstart;
+	INT32 h_start = vi_io.hstart;
 
-	UINT32 x_add = vi_x_scale & 0xfff;
+	UINT32 x_add = vi_io.xscale;
 
 	int vinnglitch = 0;
 
@@ -992,7 +994,7 @@ int rdp_update()
 
 	h_start -= (ispal ? 128 : 108);
 
-	UINT32 x_start, x_start_init = (vi_x_scale >> 16) & 0xfff;
+	UINT32 x_start, x_start_init = vi_io.xsubpixel;
 
 	int h_start_clamped = 0;
 
@@ -1007,25 +1009,15 @@ int rdp_update()
 
 	int cache_marker_init = (x_start_init >> 10) - 1;
 	
-	INT32 v_end = vi_v_start & 0x3ff;
-	INT32 v_sync = vi_v_sync & 0x3ff;
+	INT32 v_end = vi_io.vend;
+	INT32 v_sync = vi_io.halfLinesPerField;
 
 	int validinterlace = (vitype & 2) && serration_pulses;
-	if (validinterlace && prevserrate && emucontrolsvicurrent < 0)
-		emucontrolsvicurrent = (vi_v_current_line & 1) != prevvicurrent ? 1 : 0;
 
 	int lowerfield = 0;
 	if (validinterlace)
 	{
-		if (emucontrolsvicurrent == 1)
-			lowerfield = (vi_v_current_line & 1) ^ 1;
-		else if (!emucontrolsvicurrent)
-		{
-			if (v_start == oldvstart)
-				lowerfield = oldlowerfield ^ 1;
-			else
-				lowerfield = v_start < oldvstart ? 1 : 0;
-		}
+		lowerfield = (vi_io.field & vi_io.serrate) ^ 1;
 	}
 
 	oldlowerfield = lowerfield;
@@ -1033,7 +1025,7 @@ int rdp_update()
 	if (validinterlace)
 	{
 		prevserrate = 1;
-		prevvicurrent = vi_v_current_line & 1;
+		prevvicurrent = vi_io.field & vi_io.serrate;
 	}
 	else
 		prevserrate = 0;
@@ -1047,8 +1039,8 @@ int rdp_update()
 	INT32 vstartoffset = ispal ? 44 : 34;
 	v_start = (v_start - vstartoffset) / 2;
 	
-	UINT32 y_start = (vi_y_scale >> 16) & 0xfff;
-	UINT32 y_add = vi_y_scale & 0xfff;
+	UINT32 y_start = vi_io.ysubpixel;
+	UINT32 y_add = vi_io.yscale;
 
 	if (v_start < 0)
 	{
@@ -1067,13 +1059,13 @@ int rdp_update()
 	if ((vres + v_start) > PRESCALE_HEIGHT)
 	{
 		vres = PRESCALE_HEIGHT - v_start;
-		popmessage("vres = %d v_start = %d v_video_start = %d", vres, v_start, (vi_v_start >> 16) & 0x3ff);
+		popmessage("vres = %d v_start = %d v_video_start = %d", vres, v_start, vi_io.vend);
 	}
 
 	INT32 h_end = hres + h_start;
 	INT32 hrightblank = PRESCALE_WIDTH - h_end;
 
-	int vactivelines = (vi_v_sync & 0x3ff) - vstartoffset;
+	int vactivelines = vi_io.halfLinesPerField - vstartoffset;
 	if (UNLIKELY(vactivelines > PRESCALE_HEIGHT))
 		fatalerror("VI_V_SYNC_REG too big");
 	if (vactivelines < 0)
@@ -1082,13 +1074,13 @@ int rdp_update()
 
 	int validh = (hres > 0 && h_start < PRESCALE_WIDTH);
 
-	UINT32 frame_buffer = vi_origin & 0xffffff;
+	UINT32 frame_buffer = vi_io.dramAddress;
 	
 	UINT32 pixels = 0, nextpixels = 0, fetchbugstate = 0;
 	CCVG color, nextcolor, scancolor, scannextcolor;
 	int r = 0, g = 0, b = 0;
 	int xfrac = 0, yfrac = 0; 
-	int vi_width_low = vi_width & 0xfff;
+	int vi_width_low = vi_io.width & 0xfff;
 	int line_x = 0, next_line_x = 0, prev_line_x = 0, far_line_x = 0;
 	int cache_marker = 0, cache_next_marker = 0, divot_cache_marker = 0, divot_cache_next_marker = 0;
 	int prev_scan_x = 0, scan_x = 0, next_scan_x = 0, far_scan_x = 0;
@@ -1440,7 +1432,7 @@ int rdp_update()
 			}
 			break;
 		}
-        default:    popmessage("Unknown framebuffer format %d\n", vi_control & 0x3);
+        default:    popmessage("Unknown framebuffer format %d\n", vi_io.colorDepth);
 	}
 
 	visiblelines = (ispal ? 576 : 480) >> lineshifter;
@@ -1453,24 +1445,24 @@ int rdp_update_fast()
 	int i, j;
 
 	INT32 hres, vres;
-	hres = (vi_h_start & 0x3ff) - ((vi_h_start >> 16) & 0x3ff);
+	hres = vi_io.hend - vi_io.hstart;
 		
-	vres = (vi_v_start & 0x3ff) - ((vi_v_start >> 16) & 0x3ff);
+	vres = vi_io.vend - vi_io.vstart;
 	vres >>= 1;
 
-	int vitype = vi_control & 3;
-	int serration_pulses = (vi_control >> 6) & 1;
+	int vitype = vi_io.colorDepth;
+	int serration_pulses = vi_io.serrate;
 
-	int ispal = (vi_v_sync & 0x3ff) > 550;
+	int ispal = vi_io.halfLinesPerField > 550;
 
-	INT32 v_start = (vi_v_start >> 16) & 0x3ff;
-	INT32 h_start = (vi_h_start >> 16) & 0x3ff;
+	INT32 v_start = vi_io.vstart;
+	INT32 h_start = vi_io.hstart;
 
-	UINT32 x_add = vi_x_scale & 0xfff;
+	UINT32 x_add = vi_io.xscale;
 
 	h_start -= (ispal ? 128 : 108);
 
-	UINT32 x_start, x_start_init = (vi_x_scale >> 16) & 0xfff;
+	UINT32 x_start, x_start_init = vi_io.xsubpixel;
 
 	int h_start_clamped = 0;
 
@@ -1484,21 +1476,11 @@ int rdp_update_fast()
 	}
 
 	int validinterlace = (vitype & 2) && serration_pulses;
-	if (validinterlace && prevserrate && emucontrolsvicurrent < 0)
-		emucontrolsvicurrent = (vi_v_current_line & 1) != prevvicurrent ? 1 : 0;
 
 	int lowerfield = 0;
 	if (validinterlace)
 	{
-		if (emucontrolsvicurrent == 1)
-			lowerfield = (vi_v_current_line & 1) ^ 1;
-		else if (!emucontrolsvicurrent)
-		{
-			if (v_start == oldvstart)
-				lowerfield = oldlowerfield ^ 1;
-			else
-				lowerfield = v_start < oldvstart ? 1 : 0;
-		}
+		lowerfield = (vi_io.field & vi_io.serrate) ^ 1;
 	}
 
 	oldlowerfield = lowerfield;
@@ -1506,7 +1488,7 @@ int rdp_update_fast()
 	if (validinterlace)
 	{
 		prevserrate = 1;
-		prevvicurrent = vi_v_current_line & 1;
+		prevvicurrent = vi_io.field & vi_io.serrate;
 	}
 	else
 		prevserrate = 0;
@@ -1520,8 +1502,8 @@ int rdp_update_fast()
 	INT32 vstartoffset = ispal ? 44 : 34;
 	v_start = (v_start - vstartoffset) / 2;
 
-	UINT32 y_start = (vi_y_scale >> 16) & 0xfff;
-	UINT32 y_add = vi_y_scale & 0xfff;
+	UINT32 y_start = vi_io.ysubpixel;
+	UINT32 y_add = vi_io.yscale;
 
 	if (v_start < 0)
 	{
@@ -1540,13 +1522,13 @@ int rdp_update_fast()
 	if ((vres + v_start) > PRESCALE_HEIGHT)
 	{
 		vres = PRESCALE_HEIGHT - v_start;
-		popmessage("vres = %d v_start = %d v_video_start = %d", vres, v_start, (vi_v_start >> 16) & 0x3ff);
+		popmessage("vres = %d v_start = %d v_video_start = %d", vres, v_start, vi_io.vend);
 	}
 
 	INT32 h_end = hres + h_start;
 	INT32 hrightblank = PRESCALE_WIDTH - h_end;
 
-	int vactivelines = (vi_v_sync & 0x3ff) - vstartoffset;
+	int vactivelines = vi_io.halfLinesPerField - vstartoffset;
 	if (UNLIKELY(vactivelines > PRESCALE_HEIGHT))
 		fatalerror("VI_V_SYNC_REG too big");
 	if (vactivelines < 0)
@@ -1555,11 +1537,11 @@ int rdp_update_fast()
 
 	int validh = (hres > 0 && h_start < PRESCALE_WIDTH);
 
-	UINT32 frame_buffer = vi_origin & 0xffffff;
+	UINT32 frame_buffer = vi_io.dramAddress;
 
 	UINT32 pixels = 0;
 	int r = 0, g = 0, b = 0;
-	int vi_width_low = vi_width & 0xfff;
+	int vi_width_low = vi_io.width & 0xfff;
 	int line_x = 0;
 	int cur_x = 0;
 
@@ -1735,7 +1717,7 @@ int rdp_update_fast()
 			}
 			break;
 		}
-        default: popmessage("Unknown framebuffer format %d\n", vi_control & 0x3);
+        default: popmessage("Unknown framebuffer format %d\n", vi_io.colorDepth);
 	}
 
 	visiblelines = (ispal ? 576 : 480) >> lineshifter;
@@ -1762,7 +1744,7 @@ STATIC STRICTINLINE void vi_fetch_filter16(CCVG* res, UINT32 fboffset, UINT32 cu
 	g = GET_MED(pix);
 	b = GET_LOW(pix);
 
-	UINT32 fbw = vi_width & 0xfff;
+	UINT32 fbw = vi_io.width & 0xfff;
 
 	if (cur_cvg == 7)
 	{
@@ -1794,7 +1776,7 @@ STATIC STRICTINLINE void vi_fetch_filter32(CCVG* res, UINT32 fboffset, UINT32 cu
 	g = (pix >> 16) & 0xff;
 	b = (pix >> 8) & 0xff;
 
-	UINT32 fbw = vi_width & 0xfff;
+	UINT32 fbw = vi_io.width & 0xfff;
 	
 	if (cur_cvg == 7)
 	{
@@ -8140,7 +8122,7 @@ void rdp_process_list(void)
 {
 	int i, length;
 	UINT32 cmd, cmd_length;
-	UINT32 dp_current_al = dp_current & ~7, dp_end_al = dp_end & ~7;
+	UINT32 dp_current_al = rdp_cmd.current & ~7, dp_end_al = rdp_cmd.end & ~7;
 	
 	if (dp_end_al <= dp_current_al)
 	{
@@ -8159,7 +8141,7 @@ void rdp_process_list(void)
 	{
 		int toload = remaining_length > 0x10000 ? 0x10000 : remaining_length;
 
-		if (dp_status & DP_STATUS_XBUS_DMA)
+		if (rdp_cmd.source/* == DP_STATUS_XBUS_DMA*/)
 		{
 			for (i = 0; i < toload; i ++)
 			{

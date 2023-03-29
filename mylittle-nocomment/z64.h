@@ -89,23 +89,4 @@ typedef unsigned int offs_t;
 #define rdram16 ((UINT16*)ares::Nintendo64::rdram.ram.data)
 #define rdram8 ((UINT8*)ares::Nintendo64::rdram.ram.data)
 
-#define vi_control (ares::Nintendo64::vi.readWord(0 << 2))
-#define vi_origin (ares::Nintendo64::vi.readWord(1 << 2))
-#define vi_width (ares::Nintendo64::vi.readWord(2 << 2))
-
-#define vi_v_current_line (ares::Nintendo64::vi.readWord(4 << 2))
-
-#define vi_v_sync (ares::Nintendo64::vi.readWord(6 << 2))
-
-#define vi_h_start (ares::Nintendo64::vi.readWord(9 << 2))
-#define vi_v_start (ares::Nintendo64::vi.readWord(10 << 2))
-
-#define vi_x_scale (ares::Nintendo64::vi.readWord(12 << 2))
-#define vi_y_scale (ares::Nintendo64::vi.readWord(13 << 2))
-
-#define dp_start (ares::Nintendo64::rdp.readWord(0 << 2))
-#define dp_end (ares::Nintendo64::rdp.readWord(1 << 2))
-#define dp_current (ares::Nintendo64::rdp.readWord(2 << 2))
-#define dp_status (ares::Nintendo64::rdp.readWord(3 << 2))
-
 #endif
