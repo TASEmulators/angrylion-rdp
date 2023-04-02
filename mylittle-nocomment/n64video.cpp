@@ -1017,7 +1017,7 @@ int rdp_update()
 	int lowerfield = 0;
 	if (validinterlace)
 	{
-		lowerfield = (vi_io.field & vi_io.serrate) ^ 1;
+		lowerfield = (vi_io.field & vi_io.serrate);// ^ 1;
 	}
 
 	oldlowerfield = lowerfield;
@@ -1480,7 +1480,7 @@ int rdp_update_fast()
 	int lowerfield = 0;
 	if (validinterlace)
 	{
-		lowerfield = (vi_io.field & vi_io.serrate) ^ 1;
+		lowerfield = (vi_io.field & vi_io.serrate);// ^ 1;
 	}
 
 	oldlowerfield = lowerfield;
